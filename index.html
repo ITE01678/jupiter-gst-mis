@@ -17372,90 +17372,101 @@ function _presenceLabel(tab, sub, detail) {
   return s ? t + ' › ' + s : t;
 }
 
-// ── Write our heartbeat to the config list (_presence_ prefix) ───
-// Uses the existing config SP list — no separate presence list needed.
-const _PRES_KEY = '_presence_' + PRESENCE_SESSION;
+// ── Write our heartbeat to SharePoint ────────────────────────────
 async function _presenceHeartbeat() {
-  if (!_msalReady || !_msalAccount || !SP_LISTS.config) return;
-  const u = umCurrentUser ? umCurrentUser() : null;
+  if (!_msalReady || !_msalAccount || !SP_LISTS.presence) return;
+  const u = umCurrentUser();
   if (!u) return;
-  const payload = JSON.stringify({
-    email:    u.email    || u.name  || '',
-    name:     u.name     || u.email || '',
-    role:     u.role     || 'guest',
-    tab:      _presenceCurrent.tab      || curTab || '',
-    section:  _presenceCurrent.section  || curSub || '',
-    detail:   _presenceCurrent.detail   || '',
-    activity: _presenceCurrent.activity || 'Viewing',
-    lastSeen: new Date().toISOString(),
-    session:  PRESENCE_SESSION,
-  });
+
+  const label  = _presenceLabel(
+    _presenceCurrent.tab     || curTab,
+    _presenceCurrent.section || curSub,
+    _presenceCurrent.detail
+  );
+  const fields = {
+    Title:          u.email || u.name || '',
+    UserName:       u.name  || u.email || '',
+    UserRole:       u.role  || 'guest',
+    CurrentTab:     _presenceCurrent.tab     || curTab    || '',
+    CurrentSection: _presenceCurrent.section || curSub    || '',
+    CurrentDetail:  _presenceCurrent.detail  || '',
+    Activity:       _presenceCurrent.activity || 'Viewing',
+    LastSeen:       new Date().toISOString(),
+    SessionId:      PRESENCE_SESSION,
+  };
+
   try {
     if (_presenceItemId) {
-      await spUpdateItem(SP_LISTS.config, _presenceItemId, { ConfigValue: payload });
+      // Update existing record
+      await spUpdateItem(SP_LISTS.presence, _presenceItemId, fields);
     } else {
-      const existing = await spGetItems(SP_LISTS.config, `fields/Title eq '${_PRES_KEY}'`).catch(() => []);
+      // Create new record — check if one exists for this session first
+      const existing = await spGetItems(
+        SP_LISTS.presence,
+        `fields/SessionId eq '${PRESENCE_SESSION}'`
+      ).catch(() => []);
       if (existing && existing.length > 0) {
         _presenceItemId = existing[0].id;
-        await spUpdateItem(SP_LISTS.config, _presenceItemId, { ConfigValue: payload });
+        await spUpdateItem(SP_LISTS.presence, _presenceItemId, fields);
       } else {
-        const created = await spCreateItem(SP_LISTS.config, { Title: _PRES_KEY, ConfigKey: _PRES_KEY, ConfigValue: payload });
+        const created = await spCreateItem(SP_LISTS.presence, fields);
         if (created && created.id) _presenceItemId = created.id;
       }
     }
-  } catch(e) {}
+  } catch(e) { /* silent — never interrupt the user */ }
 }
 
-// ── Read all online users from the config list ────────────────────
+// ── Read all online users from SharePoint ─────────────────────────
 async function _presencePoll() {
-  if (!_msalReady || !_msalAccount || !SP_LISTS.config) return;
+  if (!_msalReady || !_msalAccount || !SP_LISTS.presence) return;
   try {
-    const items = await spGetItems(SP_LISTS.config, '', '').catch(() => []);
+    const items = await spGetItems(SP_LISTS.presence, '', '').catch(() => []);
     if (!items) return;
+
     const now    = Date.now();
-    const mySession = PRESENCE_SESSION;
+    const me     = (_msalAccount.username || '').toLowerCase();
     const online = [];
-    const staleIds = [];
 
     items.forEach(item => {
       const f = item.fields || {};
-      const key = f.Title || f.ConfigKey || '';
-      if (!key.startsWith('_presence_')) return;
-      let p;
-      try { p = JSON.parse(f.ConfigValue || '{}'); } catch(e) { return; }
-      if (!p.lastSeen) return;
-      const lastSeen = new Date(p.lastSeen).getTime();
-      const age = now - lastSeen;
-      if (age > PRESENCE_TTL_MS * 4) { staleIds.push(item.id); return; } // clean up ghost records
-      if (p.session === mySession) return; // skip our own session
+      if (!f.LastSeen) return;
+      const lastSeen = new Date(f.LastSeen).getTime();
+      const age      = now - lastSeen;
+      if (age > PRESENCE_TTL_MS * 2) return; // very old — skip entirely
+      const email    = (f.Title || '').toLowerCase();
+      if (email === me) return; // skip ourselves
       online.push({
         id:       item.id,
-        name:     p.name     || p.email || 'Unknown',
-        email:    p.email    || '',
-        role:     p.role     || 'guest',
-        tab:      p.tab      || '',
-        section:  p.section  || '',
-        detail:   p.detail   || '',
-        activity: age > PRESENCE_TTL_MS ? 'Away' : (p.activity || 'Viewing'),
+        name:     f.UserName     || f.Title || 'Unknown',
+        email:    f.Title        || '',
+        role:     f.UserRole     || 'guest',
+        tab:      f.CurrentTab   || '',
+        section:  f.CurrentSection || '',
+        detail:   f.CurrentDetail  || '',
+        activity: age > PRESENCE_TTL_MS ? 'Away' : (f.Activity || 'Viewing'),
         lastSeen: lastSeen,
         age:      age,
       });
     });
 
-    // Clean up stale ghost records silently
-    staleIds.forEach(id => spDeleteItem(SP_LISTS.config, id).catch(() => {}));
-
+    // Sort: most recently active first
     online.sort((a, b) => b.lastSeen - a.lastSeen);
     _presenceOnline = online;
+
+    // Update the presence panel if open
     _renderPresencePanel();
+    // Update the presence badge in header
     _updatePresenceBadge();
+
   } catch(e) {}
 }
 
 // ── Remove our record on page unload ─────────────────────────────
 async function _presenceRemove() {
-  if (!_presenceItemId || !SP_LISTS.config) return;
-  try { await spDeleteItem(SP_LISTS.config, _presenceItemId); } catch(e) {}
+  if (!_presenceItemId || !_msalReady || !SP_LISTS.presence) return;
+  try {
+    await spDeleteItem(SP_LISTS.presence, _presenceItemId);
+  } catch(e) {}
 }
 
 // ── Intercept navigation to track what user is doing ─────────────
@@ -17695,9 +17706,56 @@ function _updatePresenceBadge() {
   if (badge) badge.textContent = total;
 }
 
+// ── Auto-find or auto-create the MIS_Presence SharePoint list ────────
+const _PRESENCE_LIST_CACHE = '_mis_presence_list_id';
+async function _presenceEnsureList() {
+  // 1. Already resolved this session
+  if (SP_LISTS.presence) return true;
+  // 2. Cached from a previous session
+  const cached = localStorage.getItem(_PRESENCE_LIST_CACHE);
+  if (cached) { SP_LISTS.presence = cached; return true; }
+  // 3. Need SP_SITE_ID
+  if (!SP_SITE_ID) return false;
+  try {
+    // 4. Look for existing list by name
+    const res = await _graphFetch(`/sites/${SP_SITE_ID}/lists?$select=id,displayName`);
+    if (res && res.value) {
+      const found = res.value.find(l => l.displayName === 'MIS_Presence');
+      if (found) {
+        SP_LISTS.presence = found.id;
+        localStorage.setItem(_PRESENCE_LIST_CACHE, found.id);
+        return true;
+      }
+    }
+    // 5. Create the list
+    const created = await _graphFetch(`/sites/${SP_SITE_ID}/lists`, 'POST', {
+      displayName: 'MIS_Presence',
+      list: { template: 'genericList' },
+      columns: [
+        { name: 'UserName',       text: {} },
+        { name: 'UserRole',       text: {} },
+        { name: 'CurrentTab',     text: {} },
+        { name: 'CurrentSection', text: {} },
+        { name: 'CurrentDetail',  text: {} },
+        { name: 'Activity',       text: {} },
+        { name: 'LastSeen',       text: {} },
+        { name: 'SessionId',      text: {} },
+      ],
+    });
+    if (created && created.id) {
+      SP_LISTS.presence = created.id;
+      localStorage.setItem(_PRESENCE_LIST_CACHE, created.id);
+      return true;
+    }
+  } catch(e) {}
+  return false;
+}
+
 // ── Start presence system after login ─────────────────────────────
-function _startPresence() {
-  if (!SP_LISTS.config) return; // needs SharePoint config list
+async function _startPresence() {
+  if (!_msalReady || !_msalAccount) return;
+  const ready = await _presenceEnsureList();
+  if (!ready) return;
   // Initial heartbeat + poll
   _presenceHeartbeat();
   _presencePoll();
@@ -17706,10 +17764,10 @@ function _startPresence() {
   setInterval(_presencePoll,      PRESENCE_POLL_MS);
   // Remove record on page close
   window.addEventListener('beforeunload', _presenceRemove);
-  // Track mouse activity — if idle for 2min set activity to Away
+  // Track mouse activity — idle for 2 min → Away
   let _lastActivity = Date.now();
-  document.addEventListener('mousemove',  () => { _lastActivity = Date.now(); });
-  document.addEventListener('keydown',    () => { _lastActivity = Date.now(); });
+  document.addEventListener('mousemove', () => { _lastActivity = Date.now(); });
+  document.addEventListener('keydown',   () => { _lastActivity = Date.now(); });
   setInterval(() => {
     const idle = Date.now() - _lastActivity;
     if (idle > 2 * 60 * 1000 && _presenceCurrent.activity !== 'Away') {
