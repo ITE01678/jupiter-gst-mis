@@ -773,10 +773,9 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-seri
    4. Copy your Client ID and Tenant ID into PP_CONFIG below
    5. Upload this file as a Web File in Power Pages
    ══════════════════════════════════════════════════════════════════ */
-// ── Secure App Configuration ───────────────────────────────────────────────────
-// All tenant-specific secrets load from localStorage only — never stored in code.
-// On first launch (or when config is missing) the ⚙ Setup modal will open.
-// Admins: use the ⚙ App Config button (top-right header) to enter / update values.
+// ── App Configuration ──────────────────────────────────────────────────────────
+// Default values are hardcoded below. localStorage overrides (set via ⚙ Config
+// button) take precedence — useful if PA flow URLs are regenerated or config changes.
 const _APP_CFG_KEY = '_jupiter_mis_cfg';
 function _appCfgLoad(){try{return JSON.parse(localStorage.getItem(_APP_CFG_KEY)||'{}');}catch(e){return{};}}
 window._appCfgSave = function(o){ localStorage.setItem(_APP_CFG_KEY, JSON.stringify(o)); location.reload(); };
@@ -784,22 +783,35 @@ window._appCfgGet  = function(){ return _appCfgLoad(); };
 const _appCfg = _appCfgLoad();
 
 const PP_CONFIG = {
-  clientId:       _appCfg.clientId       || '',
-  tenantId:       _appCfg.tenantId       || '',
-  groups:         _appCfg.groups         || {},
+  clientId:   _appCfg.clientId   || 'a08118b2-eafe-4966-9714-283fd4fa9639',
+  tenantId:   _appCfg.tenantId   || '56f1281f-8bae-4a11-b547-c68f7f8679fb',
+  groups: _appCfg.groups || {
+    '2e498e42-5032-4781-b60b-ac950b57c28b': 'workspace',
+    'd990d8c3-2417-4109-85b6-3d4d36f97fea': 'admin',
+    '63c5bfa5-01ef-4e58-944f-e4442041ba23': 'user',
+    '807edb2f-4cc6-4adb-a232-3979a8b7b950': 'guest',
+  },
   requiredDomain: _appCfg.requiredDomain || '',
 };
-const SP_SITE_ID     = _appCfg.spSiteId      || '';
-const SP_LISTS       = Object.assign(
-  {filing:'',issues:'',closed:'',pitc:'',summary:'',changelog:'',config:'',importHistory:''},
-  _appCfg.spLists || {}
-);
+const SP_SITE_ID = _appCfg.spSiteId || 'jupiterkolkata.sharepoint.com,ce2c0cc4-413a-4855-b323-244240b1ef52,134072ff-3770-428f-9c7b-91c3c724b5d5';
+const SP_LISTS = Object.assign({
+  filing:        'A6EEE439-BA98-47FB-82E7-420192CF2A64',
+  issues:        'bd6c6ee7-61a7-46a3-a7a5-fe0ade531748',
+  closed:        '362dad3f-b64f-4ee3-9e10-04b9f210b60e',
+  pitc:          '9c5f1dcf-5b44-43d2-b982-8b98af6a4b1f',
+  summary:       '6d679e5e-c1a8-49e2-8a2f-27aaa43c4715',
+  changelog:     '31476e87-9426-4109-868f-b232dd7656fd',
+  config:        '8d23e04a-3a5e-4ccb-b535-2457ff999d1f',
+  importHistory: 'd0738f03-b3f1-4e30-9079-0b570ac93060',
+}, _appCfg.spLists || {});
 const GRAPH_BASE     = 'https://graph.microsoft.com/v1.0';
-const SP_DOC_LIBRARY = _appCfg.spDocLibrary  || 'MISDocuments';
-const FLOW_URLS      = Object.assign(
-  {changelogLog:'', aiProxy:'', weeklySummary:'', deadlineAlert:''},
-  _appCfg.flowUrls || {}
-);
+const SP_DOC_LIBRARY = _appCfg.spDocLibrary || 'MISDocuments';
+const FLOW_URLS = Object.assign({
+  changelogLog:  'https://261e710f0ccee5329027fcb101e133.d5.environment.api.powerplatform.com:443/powerautomate/automations/direct/workflows/fe46027e5de2469199731d42c3ef85f3/triggers/manual/paths/invoke?api-version=1&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=B2fgxzbAn9xWLiEDuK6iQ_KTkelDHe2zyDnlN3J0YM4',
+  aiProxy:       '',
+  weeklySummary: 'https://261e710f0ccee5329027fcb101e133.d5.environment.api.powerplatform.com:443/powerautomate/automations/direct/workflows/b377f9ea02834837a1a571a6a19a027a/triggers/manual/paths/invoke?api-version=1&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=Km-e-lnuJB7DRV-ppohyGMg6NcEZxtMVntW6vPy84Vw',
+  deadlineAlert: 'https://261e710f0ccee5329027fcb101e133.d5.environment.api.powerplatform.com:443/powerautomate/automations/direct/workflows/eb58256596764b3488c826599607275a/triggers/manual/paths/invoke?api-version=1&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=8jEpf3x8bSp_Pmmpi7vg0MfcWwfRbQ8qI1F8H9dci04',
+}, _appCfg.flowUrls || {});
 
 
 window.triggerIssueAlert = async function(issue) {
@@ -1010,7 +1022,6 @@ function _waitForMSAL(callback, timeout) {
 function _initMSAL() {
   // clientId must be filled in
   if (!PP_CONFIG.clientId || PP_CONFIG.clientId === 'YOUR-APP-REGISTRATION-CLIENT-ID') {
-    setTimeout(function(){ if(typeof _showAppConfigModal==='function') _showAppConfigModal(); }, 600);
     return false;
   }
   // MSAL must be loaded — checked by caller after _waitForMSAL resolves
@@ -19048,18 +19059,7 @@ window.initApp();
     buildModal();
   };
 
-  /* Auto-open if no clientId set and not already open */
-  function _autoOpen(){
-    const cfg = loadCfg();
-    if(!cfg.clientId && !$('_acfg_overlay')){
-      buildModal();
-    }
-  }
-  if(document.readyState==='loading'){
-    document.addEventListener('DOMContentLoaded', _autoOpen);
-  } else {
-    setTimeout(_autoOpen, 800);
-  }
+  /* Modal is available via ⚙ button — no auto-open since defaults are hardcoded */
 })();
 </script>
 </body>
