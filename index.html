@@ -17706,11 +17706,56 @@ function _updatePresenceBadge() {
   if (badge) badge.textContent = total;
 }
 
+// ── Auto-find or auto-create the MIS_Presence SharePoint list ────────
+const _PRESENCE_LIST_CACHE = '_mis_presence_list_id';
+async function _presenceEnsureList() {
+  // 1. Already resolved this session
+  if (SP_LISTS.presence) return true;
+  // 2. Cached from a previous session
+  const cached = localStorage.getItem(_PRESENCE_LIST_CACHE);
+  if (cached) { SP_LISTS.presence = cached; return true; }
+  // 3. Need SP_SITE_ID
+  if (!SP_SITE_ID) return false;
+  try {
+    // 4. Look for existing list by name
+    const res = await _graphFetch(`/sites/${SP_SITE_ID}/lists?$select=id,displayName`);
+    if (res && res.value) {
+      const found = res.value.find(l => l.displayName === 'MIS_Presence');
+      if (found) {
+        SP_LISTS.presence = found.id;
+        localStorage.setItem(_PRESENCE_LIST_CACHE, found.id);
+        return true;
+      }
+    }
+    // 5. Create the list
+    const created = await _graphFetch(`/sites/${SP_SITE_ID}/lists`, 'POST', {
+      displayName: 'MIS_Presence',
+      list: { template: 'genericList' },
+      columns: [
+        { name: 'UserName',       text: {} },
+        { name: 'UserRole',       text: {} },
+        { name: 'CurrentTab',     text: {} },
+        { name: 'CurrentSection', text: {} },
+        { name: 'CurrentDetail',  text: {} },
+        { name: 'Activity',       text: {} },
+        { name: 'LastSeen',       text: {} },
+        { name: 'SessionId',      text: {} },
+      ],
+    });
+    if (created && created.id) {
+      SP_LISTS.presence = created.id;
+      localStorage.setItem(_PRESENCE_LIST_CACHE, created.id);
+      return true;
+    }
+  } catch(e) {}
+  return false;
+}
+
 // ── Start presence system after login ─────────────────────────────
-function _startPresence() {
-  if (!SP_LISTS.presence || SP_LISTS.presence.includes('PASTE')) {
-    return; // list not configured yet — skip silently
-  }
+async function _startPresence() {
+  if (!_msalReady || !_msalAccount) return;
+  const ready = await _presenceEnsureList();
+  if (!ready) return;
   // Initial heartbeat + poll
   _presenceHeartbeat();
   _presencePoll();
@@ -17719,10 +17764,10 @@ function _startPresence() {
   setInterval(_presencePoll,      PRESENCE_POLL_MS);
   // Remove record on page close
   window.addEventListener('beforeunload', _presenceRemove);
-  // Track mouse activity — if idle for 2min set activity to Away
+  // Track mouse activity — idle for 2 min → Away
   let _lastActivity = Date.now();
-  document.addEventListener('mousemove',  () => { _lastActivity = Date.now(); });
-  document.addEventListener('keydown',    () => { _lastActivity = Date.now(); });
+  document.addEventListener('mousemove', () => { _lastActivity = Date.now(); });
+  document.addEventListener('keydown',   () => { _lastActivity = Date.now(); });
   setInterval(() => {
     const idle = Date.now() - _lastActivity;
     if (idle > 2 * 60 * 1000 && _presenceCurrent.activity !== 'Away') {
