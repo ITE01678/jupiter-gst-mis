@@ -17706,79 +17706,104 @@ function _updatePresenceBadge() {
   if (badge) badge.textContent = total;
 }
 
-// ── Auto-find or auto-create the MIS_Presence SharePoint list ────────
-const _PRESENCE_LIST_CACHE = '_mis_presence_list_id';
-async function _presenceEnsureList() {
-  // 1. Already resolved this session
-  if (SP_LISTS.presence) return true;
-  // 2. Cached from a previous session
-  const cached = localStorage.getItem(_PRESENCE_LIST_CACHE);
-  if (cached) { SP_LISTS.presence = cached; return true; }
-  // 3. Need SP_SITE_ID
-  if (!SP_SITE_ID) return false;
+// ── Presence uses the existing config SP list — no new list needed ───
+// Each session writes a _presence_SESSION key; others read and filter.
+const _PRES_PREFIX = '_presence_';
+const _PRES_KEY    = _PRES_PREFIX + PRESENCE_SESSION;
+
+async function _presenceHeartbeat() {
+  if (!_msalReady || !_msalAccount || !SP_LISTS.config) return;
+  const u = typeof umCurrentUser === 'function' ? umCurrentUser() : null;
+  if (!u) return;
+  const payload = JSON.stringify({
+    email:    u.email    || u.name  || '',
+    name:     u.name     || u.email || '',
+    role:     u.role     || 'guest',
+    tab:      _presenceCurrent.tab      || curTab || '',
+    section:  _presenceCurrent.section  || curSub || '',
+    detail:   _presenceCurrent.detail   || '',
+    activity: _presenceCurrent.activity || 'Viewing',
+    lastSeen: new Date().toISOString(),
+    session:  PRESENCE_SESSION,
+  });
   try {
-    // 4. Look for existing list by name
-    const res = await _graphFetch(`/sites/${SP_SITE_ID}/lists?$select=id,displayName`);
-    if (res && res.value) {
-      const found = res.value.find(l => l.displayName === 'MIS_Presence');
-      if (found) {
-        SP_LISTS.presence = found.id;
-        localStorage.setItem(_PRESENCE_LIST_CACHE, found.id);
-        return true;
+    if (_presenceItemId) {
+      await spUpdateItem(SP_LISTS.config, _presenceItemId, { ConfigValue: payload });
+    } else {
+      const ex = await spGetItems(SP_LISTS.config, `fields/Title eq '${_PRES_KEY}'`).catch(() => []);
+      if (ex && ex.length > 0) {
+        _presenceItemId = ex[0].id;
+        await spUpdateItem(SP_LISTS.config, _presenceItemId, { ConfigValue: payload });
+      } else {
+        const cr = await spCreateItem(SP_LISTS.config, { Title: _PRES_KEY, ConfigKey: _PRES_KEY, ConfigValue: payload });
+        if (cr && cr.id) _presenceItemId = cr.id;
       }
     }
-    // 5. Create the list
-    const created = await _graphFetch(`/sites/${SP_SITE_ID}/lists`, 'POST', {
-      displayName: 'MIS_Presence',
-      list: { template: 'genericList' },
-      columns: [
-        { name: 'UserName',       text: {} },
-        { name: 'UserRole',       text: {} },
-        { name: 'CurrentTab',     text: {} },
-        { name: 'CurrentSection', text: {} },
-        { name: 'CurrentDetail',  text: {} },
-        { name: 'Activity',       text: {} },
-        { name: 'LastSeen',       text: {} },
-        { name: 'SessionId',      text: {} },
-      ],
-    });
-    if (created && created.id) {
-      SP_LISTS.presence = created.id;
-      localStorage.setItem(_PRESENCE_LIST_CACHE, created.id);
-      return true;
-    }
   } catch(e) {}
-  return false;
 }
 
-// ── Start presence system after login ─────────────────────────────
-async function _startPresence() {
-  if (!_msalReady || !_msalAccount) return;
-  const ready = await _presenceEnsureList();
-  if (!ready) return;
-  // Initial heartbeat + poll
+async function _presencePoll() {
+  if (!_msalReady || !_msalAccount || !SP_LISTS.config) return;
+  try {
+    const items = await spGetItems(SP_LISTS.config, '', '').catch(() => []);
+    if (!items) return;
+    const now = Date.now();
+    const online = [];
+    const stale  = [];
+    items.forEach(item => {
+      const f   = item.fields || {};
+      const key = f.Title || f.ConfigKey || '';
+      if (!key.startsWith(_PRES_PREFIX)) return;
+      let p; try { p = JSON.parse(f.ConfigValue || '{}'); } catch(e) { return; }
+      if (!p.lastSeen) return;
+      const lastSeen = new Date(p.lastSeen).getTime();
+      const age      = now - lastSeen;
+      if (age > PRESENCE_TTL_MS * 4) { stale.push(item.id); return; }
+      if (p.session === PRESENCE_SESSION) return; // skip own session
+      online.push({
+        id: item.id, name: p.name || p.email || 'Unknown',
+        email: p.email || '', role: p.role || 'guest',
+        tab: p.tab || '', section: p.section || '', detail: p.detail || '',
+        activity: age > PRESENCE_TTL_MS ? 'Away' : (p.activity || 'Viewing'),
+        lastSeen, age,
+      });
+    });
+    stale.forEach(id => spDeleteItem(SP_LISTS.config, id).catch(() => {}));
+    online.sort((a, b) => b.lastSeen - a.lastSeen);
+    _presenceOnline = online;
+    _renderPresencePanel();
+    _updatePresenceBadge();
+  } catch(e) {}
+}
+
+async function _presenceRemove() {
+  if (!_presenceItemId || !SP_LISTS.config) return;
+  try { await spDeleteItem(SP_LISTS.config, _presenceItemId); } catch(e) {}
+}
+
+// ── Start presence — runs ONCE per page load ──────────────────────
+let _presenceStarted = false;
+function _startPresence() {
+  if (_presenceStarted || !_msalReady || !_msalAccount || !SP_LISTS.config) return;
+  _presenceStarted = true;
   _presenceHeartbeat();
   _presencePoll();
-  // Recurring intervals
   setInterval(_presenceHeartbeat, PRESENCE_HB_MS);
   setInterval(_presencePoll,      PRESENCE_POLL_MS);
-  // Remove record on page close
   window.addEventListener('beforeunload', _presenceRemove);
-  // Track mouse activity — idle for 2 min → Away
   let _lastActivity = Date.now();
   document.addEventListener('mousemove', () => { _lastActivity = Date.now(); });
   document.addEventListener('keydown',   () => { _lastActivity = Date.now(); });
   setInterval(() => {
     const idle = Date.now() - _lastActivity;
-    if (idle > 2 * 60 * 1000 && _presenceCurrent.activity !== 'Away') {
+    if (idle > 2 * 60 * 1000 && _presenceCurrent.activity !== 'Away')
       _presenceSetActivity('Away', curTab, curSub, '');
-    } else if (idle < 2 * 60 * 1000 && _presenceCurrent.activity === 'Away') {
+    else if (idle < 2 * 60 * 1000 && _presenceCurrent.activity === 'Away')
       _presenceSetActivity('Viewing', curTab, curSub, '');
-    }
   }, 30000);
 }
 
-// Hook into misInitSync so presence starts after login
+// Hook into misInitSync — _startPresence guard ensures single execution
 const _origMisInitSyncP = window.misInitSync || misInitSync;
 window.misInitSync = async function() {
   if (_origMisInitSyncP) await _origMisInitSyncP();
