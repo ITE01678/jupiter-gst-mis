@@ -773,28 +773,24 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-seri
    4. Copy your Client ID and Tenant ID into PP_CONFIG below
    5. Upload this file as a Web File in Power Pages
    ══════════════════════════════════════════════════════════════════ */
-// ── App Configuration ──────────────────────────────────────────────────────────
-// Default values are hardcoded below. localStorage overrides (set via ⚙ Config
-// button) take precedence — useful if PA flow URLs are regenerated or config changes.
-const _APP_CFG_KEY = '_jupiter_mis_cfg';
-function _appCfgLoad(){try{return JSON.parse(localStorage.getItem(_APP_CFG_KEY)||'{}');}catch(e){return{};}}
-window._appCfgSave = function(o){ localStorage.setItem(_APP_CFG_KEY, JSON.stringify(o)); location.reload(); };
-window._appCfgGet  = function(){ return _appCfgLoad(); };
-const _appCfg = _appCfgLoad();
-
 const PP_CONFIG = {
-  clientId:   _appCfg.clientId   || 'a08118b2-eafe-4966-9714-283fd4fa9639',
-  tenantId:   _appCfg.tenantId   || '56f1281f-8bae-4a11-b547-c68f7f8679fb',
-  groups: _appCfg.groups || {
+  clientId:   'a08118b2-eafe-4966-9714-283fd4fa9639',    // ← paste from Entra ID
+  tenantId:   '56f1281f-8bae-4a11-b547-c68f7f8679fb',                      // ← paste from Entra ID
+  // Role mapping: Entra group Object IDs → MIS role strings
+  // Create security groups in Entra ID, paste their Object IDs here
+  groups: {
     '2e498e42-5032-4781-b60b-ac950b57c28b': 'workspace',
     'd990d8c3-2417-4109-85b6-3d4d36f97fea': 'admin',
     '63c5bfa5-01ef-4e58-944f-e4442041ba23': 'user',
     '807edb2f-4cc6-4adb-a232-3979a8b7b950': 'guest',
   },
-  requiredDomain: _appCfg.requiredDomain || '',
+  // Optional: restrict login to your company domain (e.g. 'jupiter.co.in')
+  // Leave empty '' to allow any Entra ID account in your tenant
+  requiredDomain: '',
 };
-const SP_SITE_ID = _appCfg.spSiteId || 'jupiterkolkata.sharepoint.com,ce2c0cc4-413a-4855-b323-244240b1ef52,134072ff-3770-428f-9c7b-91c3c724b5d5';
-const SP_LISTS = Object.assign({
+const SP_SITE_ID = 'jupiterkolkata.sharepoint.com,ce2c0cc4-413a-4855-b323-244240b1ef52,134072ff-3770-428f-9c7b-91c3c724b5d5';
+
+const SP_LISTS = {
   filing:        'A6EEE439-BA98-47FB-82E7-420192CF2A64',
   issues:        'bd6c6ee7-61a7-46a3-a7a5-fe0ade531748',
   closed:        '362dad3f-b64f-4ee3-9e10-04b9f210b60e',
@@ -803,15 +799,23 @@ const SP_LISTS = Object.assign({
   changelog:     '31476e87-9426-4109-868f-b232dd7656fd',
   config:        '8d23e04a-3a5e-4ccb-b535-2457ff999d1f',
   importHistory: 'd0738f03-b3f1-4e30-9079-0b570ac93060',
-}, _appCfg.spLists || {});
-const GRAPH_BASE     = 'https://graph.microsoft.com/v1.0';
-const SP_DOC_LIBRARY = _appCfg.spDocLibrary || 'MISDocuments';
-const FLOW_URLS = Object.assign({
-  changelogLog:  'https://261e710f0ccee5329027fcb101e133.d5.environment.api.powerplatform.com:443/powerautomate/automations/direct/workflows/fe46027e5de2469199731d42c3ef85f3/triggers/manual/paths/invoke?api-version=1&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=B2fgxzbAn9xWLiEDuK6iQ_KTkelDHe2zyDnlN3J0YM4',
+};
+
+const GRAPH_BASE = 'https://graph.microsoft.com/v1.0';
+
+// ── Power Automate HTTP flow URLs ─────────────────────────────────
+// Paste the HTTP POST URL from each flow after creating it in Power Automate
+// Leave as empty string '' if flow not yet created — feature will be skipped gracefully
+const SP_DOC_LIBRARY = 'MISDocuments';
+// ── Power Automate HTTP flow URLs ─────────────────────────────────
+// Paste the HTTP POST URL from each flow after creating it in Power Automate
+// Leave as empty string '' if flow not yet created — feature will be skipped gracefully
+const FLOW_URLS = {
+  changelogLog:  'https://261e710f0ccee5329027fcb101e133.d5.environment.api.powerplatform.com:443/powerautomate/automations/direct/workflows/fe46027e5de2469199731d42c3ef85f3/triggers/manual/paths/invoke?api-version=1&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=B2fgxzbAn9xWLiEDuK6iQ_KTkelDHe2zyDnlN3J0YM4',   // Flow 4 — Jupiter-GST-MIS-LogChange
   aiProxy:       '',
-  weeklySummary: 'https://261e710f0ccee5329027fcb101e133.d5.environment.api.powerplatform.com:443/powerautomate/automations/direct/workflows/b377f9ea02834837a1a571a6a19a027a/triggers/manual/paths/invoke?api-version=1&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=Km-e-lnuJB7DRV-ppohyGMg6NcEZxtMVntW6vPy84Vw',
-  deadlineAlert: 'https://261e710f0ccee5329027fcb101e133.d5.environment.api.powerplatform.com:443/powerautomate/automations/direct/workflows/eb58256596764b3488c826599607275a/triggers/manual/paths/invoke?api-version=1&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=8jEpf3x8bSp_Pmmpi7vg0MfcWwfRbQ8qI1F8H9dci04',
-}, _appCfg.flowUrls || {});
+  weeklySummary: 'https://261e710f0ccee5329027fcb101e133.d5.environment.api.powerplatform.com:443/powerautomate/automations/direct/workflows/b377f9ea02834837a1a571a6a19a027a/triggers/manual/paths/invoke?api-version=1&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=Km-e-lnuJB7DRV-ppohyGMg6NcEZxtMVntW6vPy84Vw',// Azure Function or PA flow for Anthropic API proxy
+  deadlineAlert: 'https://261e710f0ccee5329027fcb101e133.d5.environment.api.powerplatform.com:443/powerautomate/automations/direct/workflows/eb58256596764b3488c826599607275a/triggers/manual/paths/invoke?api-version=1&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=8jEpf3x8bSp_Pmmpi7vg0MfcWwfRbQ8qI1F8H9dci04',   // Flow 1 — Jupiter-GST-MIS-DeadlineAlert (optional manual trigger)
+};
 
 
 window.triggerIssueAlert = async function(issue) {
@@ -7490,10 +7494,7 @@ function umInjectUserBadge(){
     </div>
     <button onclick="${_msalReady&&_msalAccount?'window.msalLogout()':'window.umLogout()'}" title="Sign Out"
       style="background:none;border:1px solid ${rc}44;border-radius:6px;cursor:pointer;padding:4px 8px;font-size:10.5px;color:${rc};font-weight:600;font-family:inherit"
-      onmouseover="this.style.background='${rc}22'" onmouseout="this.style.background='none'">Sign Out</button>
-    <button onclick="window._showAppConfigModal&&window._showAppConfigModal()" title="App Configuration"
-      style="background:none;border:1px solid ${rc}44;border-radius:6px;cursor:pointer;padding:4px 8px;font-size:13px;color:${rc};line-height:1;font-family:inherit"
-      onmouseover="this.style.background='${rc}22'" onmouseout="this.style.background='none'">⚙</button>`;
+      onmouseover="this.style.background='${rc}22'" onmouseout="this.style.background='none'">Sign Out</button>`;
   if(u.role==='guest'){
     const gb=document.createElement('span');
     gb.style.cssText='font-size:9.5px;background:#FFF7ED;color:#854F0B;border:1px solid #FCD34D;border-radius:6px;padding:2px 8px;font-weight:700;white-space:nowrap';
@@ -18866,201 +18867,5 @@ window.initApp();
 
 })();
 
-/* ════════════════════════════════════════════════════════════════════════════
-   APP CONFIG MODAL  — all tenant-specific secrets live in localStorage only
-   ════════════════════════════════════════════════════════════════════════════ */
-(function(){
-  'use strict';
-
-  const CFG_KEY = '_jupiter_mis_cfg';
-  const $ = id => document.getElementById(id);
-
-  function loadCfg(){ try{ return JSON.parse(localStorage.getItem(CFG_KEY)||'{}'); }catch(e){ return {}; } }
-  function saveCfg(obj){ localStorage.setItem(CFG_KEY, JSON.stringify(obj)); }
-
-  /* ── Render ── */
-  function buildModal(){
-    if($('_acfg_overlay')) return;
-    const ov = document.createElement('div');
-    ov.id = '_acfg_overlay';
-    ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:99999;display:flex;align-items:center;justify-content:center;padding:16px;backdrop-filter:blur(3px)';
-    ov.innerHTML = `
-<div id="_acfg_box" style="background:#fff;border-radius:14px;width:100%;max-width:680px;max-height:92vh;display:flex;flex-direction:column;box-shadow:0 24px 60px rgba(0,0,0,.35);overflow:hidden;font-family:inherit">
-  <!-- header -->
-  <div style="padding:18px 22px 14px;border-bottom:1px solid #E5E7EB;display:flex;align-items:center;justify-content:space-between;background:#F9FAFB">
-    <div>
-      <div style="font-size:16px;font-weight:800;color:#1e293b">⚙ App Configuration</div>
-      <div style="font-size:11.5px;color:#64748b;margin-top:2px">Values are stored in <strong>your browser's localStorage only</strong> — never in code or the repository.</div>
-    </div>
-    <button id="_acfg_close" style="background:none;border:none;font-size:20px;cursor:pointer;color:#94a3b8;padding:4px 8px;border-radius:6px;line-height:1" title="Close">✕</button>
-  </div>
-  <!-- tabs -->
-  <div style="display:flex;gap:0;border-bottom:1px solid #E5E7EB;padding:0 22px;background:#F9FAFB;flex-shrink:0">
-    ${['Microsoft / Entra','SharePoint','Power Automate','Access Groups'].map((t,i)=>
-      `<button class="_acfg_tab" data-tab="${i}" style="padding:10px 16px;font-size:12px;font-weight:600;cursor:pointer;border:none;background:none;color:#64748b;border-bottom:2px solid transparent;transition:all .15s;font-family:inherit">${t}</button>`
-    ).join('')}
-  </div>
-  <!-- body -->
-  <div style="flex:1;overflow-y:auto;padding:20px 22px">
-    <!-- Tab 0: Microsoft -->
-    <div class="_acfg_pane" data-pane="0">
-      <p style="font-size:11.5px;color:#64748b;margin:0 0 14px">From <strong>Microsoft Entra ID → App registrations → your app</strong>.</p>
-      ${fld('clientId','Client ID (Application ID)','a08118b2-...',0)}
-      ${fld('tenantId','Tenant ID (Directory ID)','56f1281f-...',0)}
-      ${fld('requiredDomain','Required Domain (optional)','jupiter.co.in — leave blank to allow all',0)}
-    </div>
-    <!-- Tab 1: SharePoint -->
-    <div class="_acfg_pane" data-pane="1" style="display:none">
-      <p style="font-size:11.5px;color:#64748b;margin:0 0 14px">From SharePoint → Site → site address and list GUIDs.</p>
-      ${fld('spSiteId','Site ID','hostname,site-guid,web-guid',1)}
-      ${fld('spDocLibrary','Document Library Name','MISDocuments',1)}
-      <div style="font-size:11.5px;font-weight:700;color:#374151;margin:14px 0 8px">SharePoint List GUIDs</div>
-      ${['filing','issues','closed','pitc','summary','changelog','config','importHistory'].map(k=>fld('sl_'+k, k.charAt(0).toUpperCase()+k.slice(1)+' List ID','xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx',1)).join('')}
-    </div>
-    <!-- Tab 2: Power Automate -->
-    <div class="_acfg_pane" data-pane="2" style="display:none">
-      <p style="font-size:11.5px;color:#64748b;margin:0 0 14px">HTTP trigger URLs from each Power Automate flow. Leave blank if flow not yet created.</p>
-      ${fld('fu_changelogLog','Changelog Log Flow URL','https://...powerautomate...',2)}
-      ${fld('fu_weeklySummary','Weekly Summary Flow URL','https://...powerautomate...',2)}
-      ${fld('fu_deadlineAlert','Deadline Alert Flow URL','https://...powerautomate...',2)}
-    </div>
-    <!-- Tab 3: Access Groups -->
-    <div class="_acfg_pane" data-pane="3" style="display:none">
-      <p style="font-size:11.5px;color:#64748b;margin:0 0 14px">Entra ID Security Group Object IDs mapped to MIS roles. Leave blank to skip role-based access.</p>
-      ${['workspace','admin','user','guest'].map(r=>fld('grp_'+r, r.charAt(0).toUpperCase()+r.slice(1)+' Group Object ID','xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx',3)).join('')}
-    </div>
-  </div>
-  <!-- footer -->
-  <div style="padding:14px 22px;border-top:1px solid #E5E7EB;display:flex;align-items:center;gap:10px;background:#F9FAFB;flex-shrink:0">
-    <button id="_acfg_save" style="background:#1D4ED8;color:#fff;border:none;border-radius:8px;padding:9px 22px;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit">Save & Reload</button>
-    <button id="_acfg_export" style="background:none;border:1px solid #CBD5E1;border-radius:8px;padding:8px 16px;font-size:12px;font-weight:600;cursor:pointer;color:#374151;font-family:inherit">Export JSON</button>
-    <label style="background:none;border:1px solid #CBD5E1;border-radius:8px;padding:8px 16px;font-size:12px;font-weight:600;cursor:pointer;color:#374151;display:inline-block;margin:0">
-      Import JSON<input id="_acfg_import_file" type="file" accept=".json" style="display:none">
-    </label>
-    <div id="_acfg_msg" style="font-size:12px;font-weight:600;color:#16a34a;margin-left:auto"></div>
-  </div>
-</div>`;
-    document.body.appendChild(ov);
-    populateFields();
-    activateTab(0);
-
-    /* events */
-    $('_acfg_close').onclick = closeModal;
-    ov.addEventListener('click', e=>{ if(e.target===ov) closeModal(); });
-    document.querySelectorAll('._acfg_tab').forEach(btn=>{
-      btn.addEventListener('click',()=> activateTab(+btn.dataset.tab));
-    });
-    $('_acfg_save').onclick   = doSave;
-    $('_acfg_export').onclick = doExport;
-    $('_acfg_import_file').onchange = doImport;
-  }
-
-  function fld(id, label, ph, _tab){
-    const isUrl = id.startsWith('fu_');
-    return `<div style="margin-bottom:10px">
-      <label style="display:block;font-size:11.5px;font-weight:600;color:#374151;margin-bottom:4px">${label}</label>
-      <input id="_acfg_${id}" type="${isUrl?'url':'text'}" placeholder="${ph}"
-        style="width:100%;box-sizing:border-box;padding:7px 10px;border:1px solid #D1D5DB;border-radius:7px;font-size:12px;font-family:inherit;color:#1e293b;background:#fff;outline:none"
-        onfocus="this.style.borderColor='#3B82F6'" onblur="this.style.borderColor='#D1D5DB'">
-    </div>`;
-  }
-
-  function populateFields(){
-    const c = loadCfg();
-    const set = (id, val) => { const el=$('_acfg_'+id); if(el && val) el.value=val; };
-    set('clientId',      c.clientId);
-    set('tenantId',      c.tenantId);
-    set('requiredDomain',c.requiredDomain);
-    set('spSiteId',      c.spSiteId);
-    set('spDocLibrary',  c.spDocLibrary);
-    const sl = c.spLists || {};
-    ['filing','issues','closed','pitc','summary','changelog','config','importHistory']
-      .forEach(k => set('sl_'+k, sl[k]));
-    const fu = c.flowUrls || {};
-    ['changelogLog','weeklySummary','deadlineAlert'].forEach(k => set('fu_'+k, fu[k]));
-    const gr = c.groups || {};
-    Object.entries(gr).forEach(([guid, role])=>{ const el=$('_acfg_grp_'+role); if(el) el.value=guid; });
-  }
-
-  function activateTab(idx){
-    document.querySelectorAll('._acfg_tab').forEach((b,i)=>{
-      b.style.color      = i===idx ? '#1D4ED8' : '#64748b';
-      b.style.borderBottom = i===idx ? '2px solid #1D4ED8' : '2px solid transparent';
-    });
-    document.querySelectorAll('._acfg_pane').forEach((p,i)=>{
-      p.style.display = i===idx ? 'block' : 'none';
-    });
-  }
-
-  function collectFields(){
-    const g = id => ($('_acfg_'+id)||{}).value||'';
-    const groups = {};
-    ['workspace','admin','user','guest'].forEach(role=>{
-      const guid = g('grp_'+role).trim();
-      if(guid) groups[guid] = role;
-    });
-    return {
-      clientId:       g('clientId').trim(),
-      tenantId:       g('tenantId').trim(),
-      requiredDomain: g('requiredDomain').trim(),
-      spSiteId:       g('spSiteId').trim(),
-      spDocLibrary:   g('spDocLibrary').trim() || 'MISDocuments',
-      spLists: Object.fromEntries(
-        ['filing','issues','closed','pitc','summary','changelog','config','importHistory']
-          .map(k=>[k, g('sl_'+k).trim()]).filter(([,v])=>v)
-      ),
-      flowUrls: Object.fromEntries(
-        ['changelogLog','weeklySummary','deadlineAlert']
-          .map(k=>[k, g('fu_'+k).trim()]).filter(([,v])=>v)
-      ),
-      groups,
-    };
-  }
-
-  function doSave(){
-    const cfg = collectFields();
-    if(!cfg.clientId){ alert('Client ID is required to sign in with Microsoft.'); return; }
-    if(!cfg.tenantId){ alert('Tenant ID is required.'); return; }
-    saveCfg(cfg);
-    $('_acfg_msg').textContent = '✓ Saved — reloading…';
-    setTimeout(()=> location.reload(), 800);
-  }
-
-  function doExport(){
-    const cfg = collectFields();
-    const blob = new Blob([JSON.stringify(cfg, null, 2)], {type:'application/json'});
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = 'jupiter_mis_config.json';
-    a.click();
-  }
-
-  function doImport(e){
-    const file = e.target.files[0]; if(!file) return;
-    const reader = new FileReader();
-    reader.onload = ev => {
-      try {
-        const cfg = JSON.parse(ev.target.result);
-        saveCfg(cfg);
-        $('_acfg_msg').textContent = '✓ Imported — reloading…';
-        setTimeout(()=> location.reload(), 800);
-      } catch(err){ alert('Invalid JSON file.'); }
-    };
-    reader.readAsText(file);
-  }
-
-  function closeModal(){
-    const ov = $('_acfg_overlay');
-    if(ov) ov.remove();
-  }
-
-  window._showAppConfigModal = function(){
-    closeModal();
-    buildModal();
-  };
-
-  /* Modal is available via ⚙ button — no auto-open since defaults are hardcoded */
-})();
 </script>
 </body>
-</html>
