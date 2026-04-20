@@ -17372,102 +17372,7 @@ function _presenceLabel(tab, sub, detail) {
   return s ? t + ' › ' + s : t;
 }
 
-// ── Write our heartbeat to SharePoint ────────────────────────────
-async function _presenceHeartbeat() {
-  if (!_msalReady || !_msalAccount || !SP_LISTS.presence) return;
-  const u = umCurrentUser();
-  if (!u) return;
-
-  const label  = _presenceLabel(
-    _presenceCurrent.tab     || curTab,
-    _presenceCurrent.section || curSub,
-    _presenceCurrent.detail
-  );
-  const fields = {
-    Title:          u.email || u.name || '',
-    UserName:       u.name  || u.email || '',
-    UserRole:       u.role  || 'guest',
-    CurrentTab:     _presenceCurrent.tab     || curTab    || '',
-    CurrentSection: _presenceCurrent.section || curSub    || '',
-    CurrentDetail:  _presenceCurrent.detail  || '',
-    Activity:       _presenceCurrent.activity || 'Viewing',
-    LastSeen:       new Date().toISOString(),
-    SessionId:      PRESENCE_SESSION,
-  };
-
-  try {
-    if (_presenceItemId) {
-      // Update existing record
-      await spUpdateItem(SP_LISTS.presence, _presenceItemId, fields);
-    } else {
-      // Create new record — check if one exists for this session first
-      const existing = await spGetItems(
-        SP_LISTS.presence,
-        `fields/SessionId eq '${PRESENCE_SESSION}'`
-      ).catch(() => []);
-      if (existing && existing.length > 0) {
-        _presenceItemId = existing[0].id;
-        await spUpdateItem(SP_LISTS.presence, _presenceItemId, fields);
-      } else {
-        const created = await spCreateItem(SP_LISTS.presence, fields);
-        if (created && created.id) _presenceItemId = created.id;
-      }
-    }
-  } catch(e) { /* silent — never interrupt the user */ }
-}
-
-// ── Read all online users from SharePoint ─────────────────────────
-async function _presencePoll() {
-  if (!_msalReady || !_msalAccount || !SP_LISTS.presence) return;
-  try {
-    const items = await spGetItems(SP_LISTS.presence, '', '').catch(() => []);
-    if (!items) return;
-
-    const now    = Date.now();
-    const me     = (_msalAccount.username || '').toLowerCase();
-    const online = [];
-
-    items.forEach(item => {
-      const f = item.fields || {};
-      if (!f.LastSeen) return;
-      const lastSeen = new Date(f.LastSeen).getTime();
-      const age      = now - lastSeen;
-      if (age > PRESENCE_TTL_MS * 2) return; // very old — skip entirely
-      const email    = (f.Title || '').toLowerCase();
-      if (email === me) return; // skip ourselves
-      online.push({
-        id:       item.id,
-        name:     f.UserName     || f.Title || 'Unknown',
-        email:    f.Title        || '',
-        role:     f.UserRole     || 'guest',
-        tab:      f.CurrentTab   || '',
-        section:  f.CurrentSection || '',
-        detail:   f.CurrentDetail  || '',
-        activity: age > PRESENCE_TTL_MS ? 'Away' : (f.Activity || 'Viewing'),
-        lastSeen: lastSeen,
-        age:      age,
-      });
-    });
-
-    // Sort: most recently active first
-    online.sort((a, b) => b.lastSeen - a.lastSeen);
-    _presenceOnline = online;
-
-    // Update the presence panel if open
-    _renderPresencePanel();
-    // Update the presence badge in header
-    _updatePresenceBadge();
-
-  } catch(e) {}
-}
-
-// ── Remove our record on page unload ─────────────────────────────
-async function _presenceRemove() {
-  if (!_presenceItemId || !_msalReady || !SP_LISTS.presence) return;
-  try {
-    await spDeleteItem(SP_LISTS.presence, _presenceItemId);
-  } catch(e) {}
-}
+// ── Heartbeat / Poll / Remove defined below (config-list approach) ─
 
 // ── Intercept navigation to track what user is doing ─────────────
 (function _hookNavigation() {
@@ -17971,7 +17876,7 @@ function _startLiveNotifPolling() {
 }
 
 // Hook into initApp completion — start polling after MSAL boots
-const _origMisInitSync = misInitSync;
+const _origMisInitSync = window.misInitSync || misInitSync;
 window.misInitSync = async function() {
   await _origMisInitSync();
   _startLiveNotifPolling();
