@@ -17611,38 +17611,13 @@ function _updatePresenceBadge() {
   if (badge) badge.textContent = total;
 }
 
-// ── Presence uses dedicated MIS_Presence SharePoint list ─────────
+// ── Presence uses the existing MIS_Config SP list ─────────────────
 // Each session writes a _presence_SESSION key; others read and filter.
 const _PRES_PREFIX = '_presence_';
 const _PRES_KEY    = _PRES_PREFIX + PRESENCE_SESSION;
 
-// Dynamically find or create the MIS_Presence list and set SP_LISTS.presence
-async function _initPresenceList() {
-  if (SP_LISTS.presence) return;
-  try {
-    const data = await _graphFetch(
-      `/sites/${SP_SITE_ID}/lists?$filter=displayName eq 'MIS_Presence'&$select=id,displayName`
-    );
-    if (data && data.value && data.value.length > 0) {
-      SP_LISTS.presence = data.value[0].id;
-      return;
-    }
-    // List not found — create it with a PresenceData column
-    const created = await _graphFetch(`/sites/${SP_SITE_ID}/lists`, 'POST', {
-      displayName: 'MIS_Presence',
-      list: { template: 'genericList' },
-    });
-    if (!created || !created.id) return;
-    SP_LISTS.presence = created.id;
-    await _graphFetch(`/sites/${SP_SITE_ID}/lists/${created.id}/columns`, 'POST', {
-      name: 'PresenceData',
-      text: { allowMultipleLines: true },
-    }).catch(() => {});
-  } catch(e) {}
-}
-
 async function _presenceHeartbeat() {
-  if (!_msalReady || !_msalAccount || !SP_LISTS.presence) return;
+  if (!_msalReady || !_msalAccount || !SP_LISTS.config) return;
   const u = typeof umCurrentUser === 'function' ? umCurrentUser() : null;
   if (!u) return;
   const payload = JSON.stringify({
@@ -17658,14 +17633,14 @@ async function _presenceHeartbeat() {
   });
   try {
     if (_presenceItemId) {
-      await spUpdateItem(SP_LISTS.presence, _presenceItemId, { PresenceData: payload });
+      await spUpdateItem(SP_LISTS.config, _presenceItemId, { ConfigValue: payload });
     } else {
-      const ex = await spGetItems(SP_LISTS.presence, `fields/Title eq '${_PRES_KEY}'`).catch(() => []);
+      const ex = await spGetItems(SP_LISTS.config, `fields/Title eq '${_PRES_KEY}'`).catch(() => []);
       if (ex && ex.length > 0) {
         _presenceItemId = ex[0].id;
-        await spUpdateItem(SP_LISTS.presence, _presenceItemId, { PresenceData: payload });
+        await spUpdateItem(SP_LISTS.config, _presenceItemId, { ConfigValue: payload });
       } else {
-        const cr = await spCreateItem(SP_LISTS.presence, { Title: _PRES_KEY, PresenceData: payload });
+        const cr = await spCreateItem(SP_LISTS.config, { Title: _PRES_KEY, ConfigKey: _PRES_KEY, ConfigValue: payload });
         if (cr && cr.id) _presenceItemId = cr.id;
       }
     }
@@ -17673,23 +17648,23 @@ async function _presenceHeartbeat() {
 }
 
 async function _presencePoll() {
-  if (!_msalReady || !_msalAccount || !SP_LISTS.presence) return;
+  if (!_msalReady || !_msalAccount || !SP_LISTS.config) return;
   try {
-    const items = await spGetItems(SP_LISTS.presence, '', '').catch(() => []);
+    const items = await spGetItems(SP_LISTS.config, '', '').catch(() => []);
     if (!items) return;
     const now = Date.now();
     const online = [];
     const stale  = [];
     items.forEach(item => {
       const f   = item.fields || {};
-      const key = f.Title || '';
+      const key = f.Title || f.ConfigKey || '';
       if (!key.startsWith(_PRES_PREFIX)) return;
-      let p; try { p = JSON.parse(f.PresenceData || '{}'); } catch(e) { return; }
+      let p; try { p = JSON.parse(f.ConfigValue || '{}'); } catch(e) { return; }
       if (!p.lastSeen) return;
       const lastSeen = new Date(p.lastSeen).getTime();
       const age      = now - lastSeen;
       if (age > PRESENCE_TTL_MS * 4) { stale.push(item.id); return; }
-      if (p.session === PRESENCE_SESSION) return; // skip own session
+      if (p.session === PRESENCE_SESSION) return;
       online.push({
         id: item.id, name: p.name || p.email || 'Unknown',
         email: p.email || '', role: p.role || 'guest',
@@ -17698,7 +17673,7 @@ async function _presencePoll() {
         lastSeen, age,
       });
     });
-    stale.forEach(id => spDeleteItem(SP_LISTS.presence, id).catch(() => {}));
+    stale.forEach(id => spDeleteItem(SP_LISTS.config, id).catch(() => {}));
     online.sort((a, b) => b.lastSeen - a.lastSeen);
     _presenceOnline = online;
     _renderPresencePanel();
@@ -17707,16 +17682,14 @@ async function _presencePoll() {
 }
 
 async function _presenceRemove() {
-  if (!_presenceItemId || !SP_LISTS.presence) return;
-  try { await spDeleteItem(SP_LISTS.presence, _presenceItemId); } catch(e) {}
+  if (!_presenceItemId || !SP_LISTS.config) return;
+  try { await spDeleteItem(SP_LISTS.config, _presenceItemId); } catch(e) {}
 }
 
 // ── Start presence — runs ONCE per page load ──────────────────────
 let _presenceStarted = false;
-async function _startPresence() {
-  if (_presenceStarted || !_msalReady || !_msalAccount) return;
-  await _initPresenceList();
-  if (!SP_LISTS.presence) return; // couldn't resolve list
+function _startPresence() {
+  if (_presenceStarted || !_msalReady || !_msalAccount || !SP_LISTS.config) return;
   _presenceStarted = true;
   _presenceHeartbeat();
   _presencePoll();
